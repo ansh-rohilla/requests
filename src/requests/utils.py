@@ -962,6 +962,32 @@ def default_headers() -> CaseInsensitiveDict[str]:
     )
 
 
+def _split_header_params(params: str) -> list[str]:
+    parts = []
+    current: list[str] = []
+    in_quotes = False
+    escape = False
+
+    for char in params:
+        if escape:
+            escape = False
+            current.append(char)
+        elif char == "\\":
+            escape = True
+            current.append(char)
+        elif char == '"':
+            in_quotes = not in_quotes
+            current.append(char)
+        elif char == ";" and not in_quotes:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+
+    parts.append("".join(current))
+    return parts
+
+
 def parse_header_links(value: str) -> list[dict[str, str]]:
     """Return a list of parsed link headers proxies.
 
@@ -986,11 +1012,14 @@ def parse_header_links(value: str) -> list[dict[str, str]]:
 
         link: dict[str, str] = {"url": url.strip("<> '\"")}
 
-        for param in params.split(";"):
+        for param in _split_header_params(params):
+            param = param.strip()
+            if not param:
+                continue
             try:
-                key, value = param.split("=")
+                key, value = param.split("=", 1)
             except ValueError:
-                break
+                continue
 
             link[key.strip(replace_chars)] = value.strip(replace_chars)
 

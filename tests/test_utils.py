@@ -690,6 +690,18 @@ def test_iter_slices(value, length):
                 {"url": "http://.../back.jpeg"},
             ],
         ),
+        (
+            '<https://a/b>; rel="next"; title="x=y"; type="t"',
+            [{"url": "https://a/b", "rel": "next", "title": "x=y", "type": "t"}],
+        ),
+        (
+            '<https://a/b>; title="a;b"; rel=next',
+            [{"url": "https://a/b", "title": "a;b", "rel": "next"}],
+        ),
+        (
+            r'<https://a/b>; title="a\"b;c"; rel=next',
+            [{"url": "https://a/b", "title": 'a\\"b;c', "rel": "next"}],
+        ),
         ("", []),
     ),
 )
