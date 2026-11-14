@@ -53,6 +53,7 @@ from requests.hooks import default_hooks
 from requests.models import PreparedRequest, urlencode
 from requests.sessions import SessionRedirectMixin
 from requests.structures import CaseInsensitiveDict
+from requests.utils import parse_dict_header
 
 from . import SNIMissingWarning
 from .compat import StringIO
@@ -815,6 +816,62 @@ class TestRequests:
             r = requests.get(url, auth=auth)
             assert '"auth"' in r.request.headers["Authorization"]
 
+    @pytest.mark.parametrize(
+        "qop",
+        (
+            "auth",
+            "auth-int,auth",
+            "auth-int, auth",
+            "auth, auth-int",
+            " auth ",
+            "auth-int,\tauth",
+            "auth-int,  auth",
+        ),
+    )
+    def test_DIGESTAUTH_QOP_WHITESPACE(self, qop):
+        auth = HTTPDigestAuth("user", "pass")
+        auth.init_per_thread_state()
+        challenge = (
+            f'realm="demo", nonce="6bf5d6e4da1ce66918800195d6b9130d", '
+            f'qop="{qop}", algorithm="MD5"'
+        )
+        auth._thread_local.chal = parse_dict_header(challenge)
+        header = auth.build_digest_header("GET", "https://example.test/path")
+        assert header is not None
+        assert 'qop="auth"' in header
+
+    def test_DIGESTAUTH_QOP_UNSUPPORTED(self):
+        auth = HTTPDigestAuth("user", "pass")
+        auth.init_per_thread_state()
+        challenge = (
+            'realm="demo", nonce="6bf5d6e4da1ce66918800195d6b9130d", '
+            'qop="auth-int", algorithm="MD5"'
+        )
+        auth._thread_local.chal = parse_dict_header(challenge)
+        assert auth.build_digest_header("GET", "https://example.test/path") is None
+
+    def test_DIGESTAUTH_HANDLE_401_QOP_WHITESPACE(self):
+        auth = HTTPDigestAuth("user", "pass")
+        req = requests.Request("GET", "http://example.com/").prepare()
+        auth(req)
+
+        res = requests.Response()
+        res.status_code = 401
+        res.headers["www-authenticate"] = (
+            'Digest realm="demo", nonce="12345", qop="auth-int, auth"'
+        )
+        res.request = req
+        res.connection = mock.Mock()
+        res_next = requests.Response()
+        res_next.status_code = 200
+        res.connection.send.return_value = res_next
+
+        auth.handle_401(res)
+        sent_req = res.connection.send.call_args[0][0]
+        assert "Authorization" in sent_req.headers
+        assert sent_req.headers["Authorization"].startswith("Digest ")
+        assert 'qop="auth"' in sent_req.headers["Authorization"]
+
     def test_POSTBIN_GET_POST_FILES(self, httpbin):
         url = httpbin("post")
         requests.post(url).raise_for_status()
@@ -1099,7 +1156,6 @@ class TestRequests:
         assert r.json()["files"]["file"] == "named temp file contents\n"
 
     def test_post_getattr_proxy_read_only(self, httpbin):
-
         class ReadProxy:
             def __init__(self):
                 self._file = io.BytesIO(b"streamed body")
